@@ -63,12 +63,34 @@ class EngineIO(LoggingMixin):
     def _transport(self):
         if self._opened:
             return self._transport_instance
-        self._engineIO_session = self._get_engineIO_session()
-        self._negotiate_transport()
+        if 'xhr-polling' not in self._client_transports:
+            self._engineIO_session = self._get_websocket_session()
+        else:
+            self._engineIO_session = self._get_engineIO_session()
+            self._negotiate_transport()
         self._connect_namespaces()
         self._opened = True
         self._reset_heartbeat()
         return self._transport_instance
+
+    def _get_websocket_session(self):
+        warning_screen = self._yield_warning_screen()
+        for elapsed_time in warning_screen:
+            transport = WebsocketTransport(
+                self._http_session, self._is_secure, self._url)
+            self._transport_instance = transport
+            self.transport_name = 'websocket'
+            try:
+                engineIO_packet_type, engineIO_packet_data = next(
+                    transport.recv_packet())
+                break
+            except (TimeoutError, ConnectionError) as e:
+                if not self._wait_for_connection:
+                    raise
+                warning = Exception('[waiting for connection] %s' % e)
+                warning_screen.throw(warning)
+        assert engineIO_packet_type == 0  # engineIO_packet_type == open
+        return parse_engineIO_session(engineIO_packet_data)
 
     def _get_engineIO_session(self):
         warning_screen = self._yield_warning_screen()
